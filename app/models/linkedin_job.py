@@ -13,6 +13,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.scraping_job import ScrapingJob
+    from app.models.scraping_job_result import ScrapingJobResult
 
 
 class LinkedInJob(Base):
@@ -83,6 +84,11 @@ class LinkedInJob(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
 
     scraping_job: Mapped[ScrapingJob] = relationship("ScrapingJob", back_populates="jobs")
+    search_results: Mapped[list[ScrapingJobResult]] = relationship(
+        "ScrapingJobResult",
+        back_populates="linkedin_job",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<LinkedInJob id={self.id!r} title={self.title!r}>"

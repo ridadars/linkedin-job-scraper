@@ -15,6 +15,7 @@ from app.models.enums import ScrapingJobStatus
 if TYPE_CHECKING:
     from app.models.linkedin_job import LinkedInJob
     from app.models.scraping_error import ScrapingError
+    from app.models.scraping_job_result import ScrapingJobResult
 
 
 class ScrapingJob(Base):
@@ -65,6 +66,11 @@ class ScrapingJob(Base):
     )
     errors: Mapped[list[ScrapingError]] = relationship(
         "ScrapingError",
+        back_populates="scraping_job",
+        cascade="all, delete-orphan",
+    )
+    results: Mapped[list[ScrapingJobResult]] = relationship(
+        "ScrapingJobResult",
         back_populates="scraping_job",
         cascade="all, delete-orphan",
     )

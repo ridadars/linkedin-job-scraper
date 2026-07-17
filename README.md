@@ -2,6 +2,128 @@
 
 A modular FastAPI application for searching publicly available LinkedIn job listings, storing results in SQLite, and exporting data for personal job-search research.
 
+> **Phase 4 complete:** Data processing, skill extraction, global duplicate detection, job persistence, scraping-job orchestration, progress tracking, and error recording.
+
+## Phase 4 Features
+
+Phase 4 connects the Phase 3 scraping/parsing foundation to the database.
+
+### Processing pipeline
+
+For each discovered job the pipeline runs: **merge** (card + optional detail) →
+**normalize** (title, company, location, URL, categorical values) → **validate**
+required fields → **enrich** (skills, salary, applicant count, posting date,
+country) → **classify** (`complete` / `partial` / `failed`) → **persist** (upsert
+canonical job + search association) → **update counters**. Orchestration lives in
+`app/services/scraping_job_execution_service.py` (internal only — see below).
+
+### Skill extraction
+
+Dictionary-based and deterministic (`app/skill_catalog.py` +
+`app/services/skill_extraction_service.py`). No LLM or paid API. Boundary-aware
+matching avoids substring false positives (`R` ≠ "random", `Go` ≠ "Google",
+`Java` ≠ "JavaScript", `C` ≠ every word with a "c") while still detecting `C++`,
+`C#`, `.NET`, `Node.js`, and `CI/CD`. Aliases collapse to one canonical skill
+(`NLP` → Natural Language Processing, `LLM` → Large Language Models, `GCP` →
+Google Cloud). Skills are stored as a JSON list.
+
+### Salary parsing (conservative)
+
+`app/services/salary_parser_service.py` extracts `salary_min`, `salary_max`,
+`salary_currency`, and preserves `salary_text`. It detects USD/PKR/GBP/EUR and a
+pay period, supports `k` suffixes and "from"/"up to". It **never** converts
+currencies, **never** annualizes monthly/hourly pay, and **never** invents a
+missing end of a range — ambiguous input leaves numeric fields `None`. The pay
+period is not stored (no column); a warning is emitted for monthly/hourly pay.
+
+### Applicant-count and date parsing
+
+`parse_applicant_count` returns a conservative lower-bound integer ("Over 100" /
+"100+" → 100 with a lower-bound warning; unknown/malformed → `None`).
+`parse_posted_date` converts relative strings ("2 days ago", "Reposted 1 week
+ago", "Posted yesterday") to UTC-aware datetimes against a reference time (one
+month ≈ 30 days); the raw relative text is kept in `relative_posted_time`.
+
+### Global duplicate detection & the canonical job
+
+`app/services/duplicate_service.py` matches by priority: (1) LinkedIn job ID,
+(2) normalized job URL, (3) a deterministic **SHA-256** fingerprint of
+normalized title + company + location. Different companies or different
+locations never collide via the fingerprint alone. The **canonical
+`LinkedInJob`** row represents the job itself; it is created once and updated
+with better/newer data on later encounters.
+
+### Search-to-job association
+
+A new association model `app/models/scraping_job_result.py`
+(`ScrapingJobResult`) records that a particular search discovered a particular
+canonical job, with a unique `(scraping_job_id, linkedin_job_id)` constraint.
+This makes the relationship a true many-to-many: one canonical job can appear in
+many searches, and one search can discover many jobs. The legacy
+`LinkedInJob.scraping_job_id` column is **preserved** for backward compatibility
+and records the search that first created the canonical record.
+
+### Scraping-job counters
+
+| Counter | Meaning |
+| --- | --- |
+| `discovered_jobs` | Unique job cards returned by the search parser |
+| `processed_jobs` | Discovered cards for which processing was attempted |
+| `successful_jobs` | Jobs successfully inserted/updated and associated |
+| `duplicate_jobs` | Processed jobs matched to an existing canonical job |
+| `failed_jobs` | Discovered jobs that could not be saved/associated |
+
+Invariants: counters never go negative; `processed_jobs ≤ discovered_jobs`; and
+`successful_jobs + failed_jobs == processed_jobs`. A duplicate that is
+successfully associated counts as **one successful and one duplicate** — never a
+failure.
+
+### Final status rules
+
+- `completed` — search finished and no individual job failed (an empty but valid
+  search is still `completed`).
+- `partially_completed` — at least one job saved **and** at least one failed, or
+  the run stopped after some results due to a later restriction.
+- `failed` — the search page itself could not be collected, or a blocking page
+  (CAPTCHA / sign-in / access restriction) appeared before any useful results.
+- `cancelled` — the run was cancelled; completed results are preserved.
+
+### Error recording
+
+`app/services/scraping_error_service.py` stores stable error types with short,
+sanitized messages, committed independently so a later failure never erases
+earlier error rows. It never stores HTML, cookies, tokens, credentials, or
+CAPTCHA content, truncates long messages, and de-duplicates identical errors.
+
+### Transaction strategy
+
+The run is **not** one giant transaction. Running-state changes commit up front;
+each job is persisted in its own unit of work and rolled back on failure so one
+bad job never corrupts the run or the counters. Individual job failures are
+recorded and skipped; only search-level blocking conditions stop the run.
+
+### Internal execution only
+
+Phase 4 exposes **no public `/start` or `/cancel` endpoint** — execution is an
+internal service. **No extracted jobs are persisted via any HTTP route yet.**
+Those, plus result APIs and exports, arrive in Phase 5.
+
+### Development database reset
+
+The app fails fast with a clear message if the local SQLite schema is out of
+date (rather than a confusing SQL error). Reset your development database with:
+
+```bash
+rm linkedin_jobs.db
+uvicorn app.main:app --reload
+```
+
+No automatic destructive migration is performed. For production, use **Alembic**
+migrations, **background workers** with **distributed locking** for concurrent/
+scheduled runs, and **approved LinkedIn API access**. Selectors in
+`app/linkedin_selectors.py` are synthetic and still require real-world tuning.
+`pytest -v` never contacts LinkedIn or launches a browser.
+
 > **Phase 3 complete:** Async Playwright browser automation, LinkedIn HTML parsers, safe URL validation, and blocked-page detection.
 
 ## Phase 3 Features
@@ -209,7 +331,6 @@ This tool is intended for responsible research and personal job-search assistanc
 
 ## Next Phases
 
-- **Phase 4:** Skill extraction, duplicate detection, job storage
-- **Phase 5:** Full job result API endpoints and export services
+- **Phase 5:** Public `/start` & `/cancel` execution endpoints, job result API endpoints, and export services
 - **Phase 6:** Dashboard UI
 - **Phase 7:** Final review and complete documentation
