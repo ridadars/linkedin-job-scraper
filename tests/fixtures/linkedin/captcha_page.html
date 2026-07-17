@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<!-- Synthetic CAPTCHA / security challenge page. -->
+<html lang="en">
+  <head>
+    <title>Security Verification | LinkedIn</title>
+  </head>
+  <body>
+    <form action="https://www.linkedin.com/checkpoint/challenge/verify" method="post">
+      <div id="captcha-internal" data-test-captcha>
+        <p>Let's do a quick security check to verify you are a human.</p>
+        <input name="captchaSiteKey" type="hidden" value="synthetic-key" />
+      </div>
+    </form>
+  </body>
+</html>

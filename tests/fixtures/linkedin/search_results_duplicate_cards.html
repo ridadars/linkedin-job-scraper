@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<!-- Synthetic results containing duplicate cards for dedupe testing. -->
+<html lang="en">
+  <head>
+    <title>Jobs | LinkedIn</title>
+  </head>
+  <body>
+    <main>
+      <ul class="jobs-search__results-list">
+        <li data-job-card data-job-id="5555555555" class="job-search-card">
+          <a data-test-job-link class="base-card__full-link" href="/jobs/view/5555555555/">
+            <h3 data-test-job-title class="base-search-card__title">Cloud Architect</h3>
+          </a>
+          <span data-test-company-name class="job-card-container__company-name">Nimbus</span>
+          <span data-test-job-location class="job-search-card__location">Austin, TX</span>
+        </li>
+
+        <!-- Exact duplicate of the first card by job id / URL. -->
+        <li data-job-card data-job-id="5555555555" class="job-search-card">
+          <a data-test-job-link class="base-card__full-link" href="/jobs/view/5555555555/">
+            <h3 data-test-job-title class="base-search-card__title">Cloud Architect</h3>
+          </a>
+          <span data-test-company-name class="job-card-container__company-name">Nimbus</span>
+          <span data-test-job-location class="job-search-card__location">Austin, TX</span>
+        </li>
+
+        <li data-job-card data-job-id="6666666666" class="job-search-card">
+          <a data-test-job-link class="base-card__full-link" href="/jobs/view/6666666666/">
+            <h3 data-test-job-title class="base-search-card__title">Site Reliability Engineer</h3>
+          </a>
+          <span data-test-company-name class="job-card-container__company-name">Nimbus</span>
+          <span data-test-job-location class="job-search-card__location">Austin, TX</span>
+        </li>
+      </ul>
+    </main>
+  </body>
+</html>

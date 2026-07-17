@@ -1,6 +1,7 @@
 """Pytest configuration with isolated in-memory database."""
 
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,13 @@ from app.dependencies import get_db_session, get_settings_dependency
 from app.main import app
 
 TEST_DATABASE_URL = "sqlite://"
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures" / "linkedin"
+
+
+def load_fixture(name: str) -> str:
+    """Load a synthetic LinkedIn HTML fixture by filename."""
+    return (FIXTURES_DIR / name).read_text(encoding="utf-8")
 
 
 @pytest.fixture
