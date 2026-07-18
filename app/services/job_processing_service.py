@@ -87,7 +87,7 @@ class JobProcessingService:
         skills = extract_skills(skill_text)
 
         salary = parse_salary_text(merged["salary_text"])
-        if salary.period in {"month", "hour"}:
+        if salary.period in {"hour", "day", "week", "month"}:
             warnings.append(
                 f"salary is per {salary.period}; not annualized."
             )
@@ -115,6 +115,7 @@ class JobProcessingService:
             salary_min=salary.minimum,
             salary_max=salary.maximum,
             salary_currency=salary.currency,
+            salary_period=salary.period,
             salary_text=salary.raw_text,
             description=description,
             required_skills=skills,

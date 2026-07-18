@@ -1,18 +1,31 @@
 """Scraping job and search API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.dependencies import get_db_session, get_settings_dependency
+from app.models.enums import ScrapingJobStatus
 from app.schemas.common import PaginatedResponse
+from app.schemas.job_result import JobItem, ScrapingJobResultsResponse
 from app.schemas.job_search import JobSearchRequest
 from app.schemas.scraping_job import (
     ScrapingJobCreateResponse,
     ScrapingJobDetail,
     ScrapingJobListResponse,
+    ScrapingJobStartResponse,
     ScrapingJobSummary,
 )
+from app.services import export_service
+from app.services.jobs_query_service import (
+    all_results_for_scraping_job,
+    query_results_for_scraping_job,
+)
+from app.services.scraping_job_execution_service import (
+    ScrapingJobExecutionConflictError,
+    mark_scraping_job_running,
+)
+from app.services.scraping_job_runner import run_scraping_job_sync
 from app.services.scraping_job_service import (
     InvalidScrapingJobIdError,
     ScrapingJobNotFoundError,
@@ -21,9 +34,20 @@ from app.services.scraping_job_service import (
     get_scraping_job,
     list_scraping_jobs,
 )
+from app.utils.export_response import csv_response, json_download_response
 
 search_router = APIRouter(tags=["search"])
 scraping_jobs_router = APIRouter(prefix="/scraping-jobs", tags=["scraping-jobs"])
+
+
+def _load_job_or_http(db: Session, job_id: str):
+    """Fetch a scraping job, translating domain errors to HTTP errors."""
+    try:
+        return get_scraping_job(db, job_id)
+    except InvalidScrapingJobIdError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except ScrapingJobNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @search_router.post(
@@ -77,17 +101,98 @@ def get_scraping_job_by_id(
     db: Session = Depends(get_db_session),
 ) -> ScrapingJobDetail:
     """Return full details for a single scraping job."""
-    try:
-        scraping_job = get_scraping_job(db, job_id)
-    except InvalidScrapingJobIdError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    except ScrapingJobNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
-        ) from exc
-
+    scraping_job = _load_job_or_http(db, job_id)
     return ScrapingJobDetail.model_validate(scraping_job)
+
+
+@scraping_jobs_router.post(
+    "/{job_id}/start",
+    response_model=ScrapingJobStartResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_scraping_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings_dependency),
+) -> ScrapingJobStartResponse:
+    """Start a pending scraping job in the background and return immediately.
+
+    Only pending jobs can start; the job is transitioned to ``running``
+    synchronously (preventing duplicate starts) before the actual scraping is
+    scheduled via BackgroundTasks, so the request never blocks until completion.
+    """
+    scraping_job = _load_job_or_http(db, job_id)
+    try:
+        mark_scraping_job_running(db, scraping_job)
+    except ScrapingJobExecutionConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    background_tasks.add_task(run_scraping_job_sync, scraping_job.id, settings)
+
+    return ScrapingJobStartResponse(
+        scraping_job_id=scraping_job.id,
+        status=ScrapingJobStatus.RUNNING.value,
+        message="Scraping job started; processing runs in the background.",
+    )
+
+
+@scraping_jobs_router.get(
+    "/{job_id}/results",
+    response_model=ScrapingJobResultsResponse,
+)
+def get_scraping_job_results(
+    job_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db_session),
+) -> ScrapingJobResultsResponse:
+    """Return the canonical jobs discovered by a scraping job (paginated)."""
+    scraping_job = _load_job_or_http(db, job_id)
+    jobs, total = query_results_for_scraping_job(db, scraping_job.id, page, page_size)
+    return ScrapingJobResultsResponse(
+        scraping_job_id=scraping_job.id,
+        pagination=PaginatedResponse(
+            page=page,
+            page_size=page_size,
+            total_records=total,
+            total_pages=calculate_total_pages(total, page_size),
+        ),
+        items=[JobItem.from_orm_job(job) for job in jobs],
+    )
+
+
+@scraping_jobs_router.get("/{job_id}/export/csv")
+def export_scraping_job_csv(
+    job_id: str,
+    db: Session = Depends(get_db_session),
+) -> Response:
+    """Export a single scraping job's discovered jobs as CSV."""
+    scraping_job = _load_job_or_http(db, job_id)
+    jobs = all_results_for_scraping_job(db, scraping_job.id)
+    items = [JobItem.from_orm_job(job) for job in jobs]
+    content = export_service.jobs_to_csv(items)
+    filename = export_service.safe_filename(f"scraping_job_{scraping_job.id}_jobs", "csv")
+    return csv_response(content, filename)
+
+
+@scraping_jobs_router.get("/{job_id}/export/json")
+def export_scraping_job_json(
+    job_id: str,
+    db: Session = Depends(get_db_session),
+) -> Response:
+    """Export a single scraping job's discovered jobs as JSON."""
+    scraping_job = _load_job_or_http(db, job_id)
+    jobs = all_results_for_scraping_job(db, scraping_job.id)
+    items = [JobItem.from_orm_job(job) for job in jobs]
+    payload = export_service.jobs_to_json(
+        items,
+        metadata={
+            "scraping_job_id": scraping_job.id,
+            "keywords": scraping_job.keywords,
+            "location": scraping_job.location,
+            "status": scraping_job.status,
+        },
+    )
+    filename = export_service.safe_filename(f"scraping_job_{scraping_job.id}_jobs", "json")
+    return json_download_response(payload, filename)

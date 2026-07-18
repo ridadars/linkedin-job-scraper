@@ -29,7 +29,7 @@ from app.exceptions import LinkedInScraperError
 from app.models.linkedin_job import LinkedInJob
 from app.models.scraping_job_result import ScrapingJobResult
 from app.schemas.processed_job import ProcessedJobData
-from app.services.duplicate_service import find_existing_job
+from app.services.duplicate_service import build_job_fingerprint, find_existing_job
 
 
 class JobPersistenceError(LinkedInScraperError):
@@ -69,6 +69,7 @@ def _apply_updates(job: LinkedInJob, processed: ProcessedJobData) -> None:
         "salary_min",
         "salary_max",
         "salary_currency",
+        "salary_period",
         "salary_text",
         "applicant_count",
         "easy_apply",
@@ -89,6 +90,15 @@ def _apply_updates(job: LinkedInJob, processed: ProcessedJobData) -> None:
     # Skills: replace with any non-empty skill list.
     if processed.required_skills:
         job.required_skills_json = _skills_json(processed.required_skills)
+
+    # Recompute the fingerprint from the (possibly updated) identity fields.
+    # This keeps it in sync after meaningful title/company/location changes and
+    # backfills legacy rows. A valid title always yields a valid fingerprint, so
+    # a missing update never erases an existing one.
+    if job.title:
+        job.job_fingerprint = build_job_fingerprint(
+            job.title, job.company_name, job.location
+        )
 
     # Status and freshness.
     if processed.processing_status:
@@ -114,9 +124,13 @@ def _build_new_job(
         workplace_type=processed.workplace_type,
         employment_type=processed.employment_type,
         experience_level=processed.experience_level,
+        job_fingerprint=build_job_fingerprint(
+            processed.title, processed.company_name, processed.location
+        ),
         salary_min=processed.salary_min,
         salary_max=processed.salary_max,
         salary_currency=processed.salary_currency,
+        salary_period=processed.salary_period,
         salary_text=processed.salary_text,
         description=processed.description,
         required_skills_json=_skills_json(processed.required_skills),

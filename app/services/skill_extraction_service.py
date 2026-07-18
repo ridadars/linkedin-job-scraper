@@ -46,9 +46,39 @@ def _compile(term: str) -> re.Pattern[str]:
     return re.compile(left + re.escape(term) + right, re.IGNORECASE)
 
 
+# --- Ambiguous short skills --------------------------------------------------
+# Plain word boundaries are insufficient for one/two-letter language names:
+# "Go" appears in "go-to-market"/"go live", "R" in "R&D", and "C" must not
+# duplicate "C++"/"C#". These stricter patterns encode those rules explicitly.
+# Aliases (Golang -> Go, RStudio -> R) provide additional positive evidence.
+
+# Verb-phrase continuations that indicate "go" is a verb, not the language.
+_GO_STOPWORDS = (
+    "live|ahead|forward|public|back|to|through|into|over|on|onto|beyond|"
+    "getter|get|for|do|home|out|up|down|away|big|slow|fast"
+)
+
+_AMBIGUOUS_PATTERNS: dict[str, re.Pattern[str]] = {
+    # Go: standalone, not hyphenated, not followed by a verb continuation.
+    "Go": re.compile(
+        rf"(?<![A-Za-z0-9])Go(?![A-Za-z0-9-])(?!\s+(?:{_GO_STOPWORDS})\b)",
+        re.IGNORECASE,
+    ),
+    # R: standalone, not immediately followed by '&' (excludes "R&D").
+    "R": re.compile(r"(?<![A-Za-z0-9])R(?![A-Za-z0-9&])", re.IGNORECASE),
+    # C: standalone, not followed by '+' or '#' (so "C++"/"C#" never yield C).
+    "C": re.compile(r"(?<![A-Za-z0-9])C(?![A-Za-z0-9+#])", re.IGNORECASE),
+}
+
+
+def _pattern_for(skill: str) -> re.Pattern[str]:
+    """Return the custom pattern for ambiguous skills, else the default."""
+    return _AMBIGUOUS_PATTERNS.get(skill, _compile(skill))
+
+
 # Precompile patterns once at import time.
 _CATALOG_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    (skill, _compile(skill)) for skill in all_catalog_skills()
+    (skill, _pattern_for(skill)) for skill in all_catalog_skills()
 ]
 _ALIAS_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (canonical_skill(alias), _compile(alias)) for alias in SKILL_ALIASES

@@ -46,9 +46,15 @@ class LinkedInJob(Base):
     employment_type: Mapped[str | None] = mapped_column(String(64), index=True)
     experience_level: Mapped[str | None] = mapped_column(String(64), index=True)
 
+    # Deterministic SHA-256 fingerprint of normalized title+company+location,
+    # indexed for fast fallback duplicate lookups. Not unique: incomplete or
+    # unusual records may legitimately share a fingerprint.
+    job_fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
+
     salary_min: Mapped[float | None] = mapped_column(Float)
     salary_max: Mapped[float | None] = mapped_column(Float)
     salary_currency: Mapped[str | None] = mapped_column(String(16))
+    salary_period: Mapped[str | None] = mapped_column(String(16))
     salary_text: Mapped[str | None] = mapped_column(String(256))
 
     description: Mapped[str | None] = mapped_column(Text)

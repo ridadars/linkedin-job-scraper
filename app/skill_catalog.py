@@ -133,6 +133,9 @@ SKILL_ALIASES: dict[str, str] = {
     "reactjs": "React",
     "vue": "Vue.js",
     "nextjs": "Next.js",
+    # Short-language aliases / contextual evidence.
+    "Golang": "Go",
+    "RStudio": "R",
 }
 
 

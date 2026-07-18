@@ -54,6 +54,35 @@ class ScrapingJobExecutionConflictError(LinkedInScraperError):
     code = "scraping_job_conflict"
 
 
+def mark_scraping_job_running(db: Session, job: ScrapingJob) -> ScrapingJob:
+    """Atomically transition a pending job to running (guarded), and commit.
+
+    Used by the API start endpoint to prevent duplicate starts and report a
+    running status immediately, before the actual work is scheduled in the
+    background. Raises :class:`ScrapingJobExecutionConflictError` if the job is
+    not pending.
+    """
+    status = job.status
+    if status == ScrapingJobStatus.RUNNING.value:
+        raise ScrapingJobExecutionConflictError("Scraping job is already running.")
+    if status != ScrapingJobStatus.PENDING.value:
+        raise ScrapingJobExecutionConflictError(
+            f"Scraping job cannot start from status '{status}'."
+        )
+    job.status = ScrapingJobStatus.RUNNING.value
+    job.started_at = datetime.now(UTC)
+    job.discovered_jobs = 0
+    job.processed_jobs = 0
+    job.successful_jobs = 0
+    job.duplicate_jobs = 0
+    job.failed_jobs = 0
+    job.completed_at = None
+    job.error_message = None
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 def _search_error_type(exc: Exception) -> str:
     """Map an exception to a stable error type for search-level failures."""
     if isinstance(exc, CaptchaDetectedError):
@@ -104,16 +133,49 @@ class ScrapingJobExecutionService:
         scraping_job_id: str,
         reference_time: datetime | None = None,
     ) -> ScrapingJob:
-        """Execute the scraping job and return the updated record."""
+        """Execute the scraping job and return the updated record.
+
+        Guards that the job is pending, marks it running, then runs it. Used by
+        internal callers and tests. The API path instead marks the job running
+        synchronously and calls :meth:`resume`.
+        """
         job = self._db.get(ScrapingJob, scraping_job_id)
         if job is None:
             raise ScrapingJobExecutionConflictError(
                 f"Scraping job '{scraping_job_id}' was not found."
             )
         self._guard_startable(job)
-
         self._begin(job)
+        return await self._run(job, reference_time)
 
+    async def resume(
+        self,
+        scraping_job_id: str,
+        reference_time: datetime | None = None,
+    ) -> ScrapingJob:
+        """Run a job that a caller has already transitioned to ``running``.
+
+        Used by the API start endpoint, which marks the job running
+        synchronously (to prevent duplicate starts and report status
+        immediately) and then schedules the actual work in the background.
+        """
+        job = self._db.get(ScrapingJob, scraping_job_id)
+        if job is None:
+            raise ScrapingJobExecutionConflictError(
+                f"Scraping job '{scraping_job_id}' was not found."
+            )
+        if job.status != ScrapingJobStatus.RUNNING.value:
+            raise ScrapingJobExecutionConflictError(
+                f"Scraping job must be running to resume; got '{job.status}'."
+            )
+        return await self._run(job, reference_time)
+
+    async def _run(
+        self,
+        job: ScrapingJob,
+        reference_time: datetime | None = None,
+    ) -> ScrapingJob:
+        """Collect, process, persist, and finalize a running job."""
         # --- Search-level collection ------------------------------------
         try:
             search_result = await self._scraper.collect_search_results(

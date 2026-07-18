@@ -65,16 +65,30 @@ def find_existing_job(
         if existing is not None:
             return existing
 
-    # 3. Title/company/location fingerprint fallback.
+    # 3. Persisted fingerprint fallback - direct indexed query.
     target = build_job_fingerprint(
         processed_job.title,
         processed_job.company_name,
         processed_job.location,
     )
-    candidates = db.execute(
-        select(LinkedInJob).where(LinkedInJob.title.isnot(None))
+    existing = db.execute(
+        select(LinkedInJob)
+        .where(LinkedInJob.job_fingerprint == target)
+        .limit(1)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    # Compatibility path: only legacy rows that predate the fingerprint column
+    # (NULL fingerprint) are recomputed in Python. Fully-populated tables never
+    # reach a full-table scan here.
+    legacy_candidates = db.execute(
+        select(LinkedInJob).where(
+            LinkedInJob.job_fingerprint.is_(None),
+            LinkedInJob.title.isnot(None),
+        )
     ).scalars()
-    for candidate in candidates:
+    for candidate in legacy_candidates:
         candidate_fp = build_job_fingerprint(
             candidate.title or "",
             candidate.company_name,

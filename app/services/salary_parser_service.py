@@ -35,11 +35,14 @@ _CURRENCY_CODE_PATTERNS = [
     (re.compile(r"\bEUR\b", re.IGNORECASE), "EUR"),
 ]
 
-# Pay-period detection.
+# Pay-period detection. Normalized lowercase values: hour/day/week/month/year.
+# Order matters: more specific/short periods are checked before year.
 _PERIOD_PATTERNS = [
-    (re.compile(r"hour|hr\b|/hr|an hour", re.IGNORECASE), "hour"),
-    (re.compile(r"month|/mo\b|a month|per mo\b", re.IGNORECASE), "month"),
-    (re.compile(r"year|annual|annum|/yr|a year|p\.?a\.?", re.IGNORECASE), "year"),
+    (re.compile(r"hour|hourly|/hr\b|\bhr\b|an hour", re.IGNORECASE), "hour"),
+    (re.compile(r"daily|per day|/day\b|a day", re.IGNORECASE), "day"),
+    (re.compile(r"weekly|per week|/wk\b|a week", re.IGNORECASE), "week"),
+    (re.compile(r"month|monthly|/mo\b|a month|per mo\b", re.IGNORECASE), "month"),
+    (re.compile(r"year|yearly|annual|annum|/yr\b|a year|p\.?a\.?", re.IGNORECASE), "year"),
 ]
 
 # A number, optionally followed by a 'k' thousands suffix.

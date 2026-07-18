@@ -2,7 +2,99 @@
 
 A modular FastAPI application for searching publicly available LinkedIn job listings, storing results in SQLite, and exporting data for personal job-search research.
 
-> **Phase 4 complete:** Data processing, skill extraction, global duplicate detection, job persistence, scraping-job orchestration, progress tracking, and error recording.
+> **Phase 5 (MVP) complete:** Background job execution via a `start` endpoint, results & jobs query APIs with filtering/sorting/pagination, and CSV/JSON exports (global and per scraping-job).
+
+## Phase 5 API
+
+| Method & path | Purpose |
+| --- | --- |
+| `POST /api/scraping-jobs/{job_id}/start` | Start a **pending** job; runs in the background, returns immediately |
+| `GET /api/scraping-jobs/{job_id}/results` | Paginated jobs discovered by that scraping job |
+| `GET /api/jobs` | Filter/sort/paginate all canonical jobs |
+| `GET /api/jobs/{job_id}` | A single canonical job |
+| `GET /api/export/csv` · `GET /api/export/json` | Export all (filtered) jobs |
+| `GET /api/scraping-jobs/{job_id}/export/csv` · `.../export/json` | Export one scraping job's jobs |
+
+### Start endpoint & background execution
+
+The start endpoint transitions a **pending** job to `running` synchronously
+(preventing duplicate starts and reporting status immediately), then schedules
+the real scraping via the existing internal execution service using FastAPI
+`BackgroundTasks`. It returns `202` right away and never blocks until scraping
+completes. Non-startable states return readable `409`s (already running,
+completed, failed, cancelled); a bad id is `400` and a missing job is `404`.
+
+> **`BackgroundTasks` is an in-process MVP convenience, not a production-grade
+> job queue** — tasks share the web process, don't survive a restart, and aren't
+> distributed. Production would use a real worker/queue (still no Celery/Redis in
+> this project by design).
+
+### Jobs filtering
+
+`GET /api/jobs` supports `keyword`, `company`, `location`, `country`,
+`workplace_type`, `employment_type`, `experience_level`, `skill`, `easy_apply`,
+and a `posted_after`/`posted_before` date range, plus `page`, `page_size`, and
+`sort=newest|oldest`. String filters are case-insensitive substring matches;
+categorical filters are exact. Ordering has a stable secondary key (`id`) so
+responses are deterministic.
+
+### Exports
+
+CSV is UTF-8, one job per row, skills joined by `; `, with a safe timestamped
+filename and a `Content-Disposition: attachment` header. JSON includes a
+`generated_at` timestamp, `total_jobs`, `metadata` (active filters or scraping-job
+info), and the `jobs` list. Both global and per-scraping-job variants share the
+same filtering/serialization.
+
+### Manual smoke-test finding
+
+Running the optional live smoke test (Phase 4.1) against the public logged-out
+`/jobs/search/` page returns a **sign-in wall**, which the scraper correctly
+detects as `authentication_required` and stops on — validating blocked-page
+detection against real LinkedIn markup. Because the logged-out page is walled,
+no live job cards are observable, so selectors were **not** changed (and
+blocked-page detection was **not** weakened to get around the wall).
+
+> Automated tests (`pytest -v`) mock the execution runner: they make no external
+> network requests, never launch Playwright, never require Chromium, and never
+> touch the real development database. **The dashboard/UI phase has not started.**
+
+> **Phase 4.1 hardening complete:** Salary-period persistence, indexed job-fingerprint duplicate lookup, stricter short-skill matching, clearer stale-schema detection, and an optional manual live smoke-test utility.
+
+## Phase 4.1 Hardening
+
+- **Salary-period persistence.** The parsed pay period (`hour`/`day`/`week`/`month`/`year`) is now stored on `LinkedInJob.salary_period`. It is **never annualized** and currencies are **never converted** — the original `salary_text` is preserved verbatim. When no period can be identified the field is left `None` (chosen over a sentinel `"unknown"` for consistency). An existing period is never erased by a later partial update.
+- **Indexed job fingerprint.** `LinkedInJob.job_fingerprint` stores a deterministic SHA-256 of normalized title + company + location, with a database index. Duplicate detection priority is unchanged — (1) LinkedIn job ID, (2) normalized job URL, (3) fingerprint — but the fingerprint step is now a **direct indexed query** instead of a full-table Python scan. Legacy rows with a `NULL` fingerprint (and only those) are recomputed as a bounded compatibility path, so old data never crashes lookups. The fingerprint is written on creation and recomputed when title/company/location meaningfully change; a missing value never erases a valid one. The field is intentionally **not unique** (incomplete records may legitimately collide).
+- **Stricter short-skill matching.** The one/two-letter language names get context-aware patterns: `Go` is rejected in "go-to-market"/"go live"/"go ahead" (and still not matched in "Google"/"ongoing"), `R` is rejected in "R&D" (and "React"/"required"/"recruiter"), and bare `C` is never emitted for "C++"/"C#" (but is detected in "C/C++", "C and C++", "C programming"). `Golang` and `RStudio` are aliases for `Go` and `R`. Existing support for `C++`, `C#`, `.NET`, `Node.js`, `CI/CD`, `Java`, and `JavaScript` is preserved.
+- **Clearer schema compatibility.** A fresh database created via `create_all` includes the new columns and index. An out-of-date database produces a readable developer error (naming the missing columns) instead of an opaque SQL error. **No database is ever automatically deleted or migrated.**
+
+### Development database reset (destructive)
+
+If the compatibility check reports a stale schema, reset your **development** database. This is destructive and only appropriate for the local dev database:
+
+```bash
+cp linkedin_jobs.db linkedin_jobs_backup.db   # optional backup
+rm linkedin_jobs.db
+uvicorn app.main:app --reload                 # recreates a fresh schema
+```
+
+Production deployments must use a real migration system (**Alembic**) rather than this manual reset.
+
+### Optional manual live smoke test
+
+Selectors are synthetic and validated only against fixtures, so **real LinkedIn selectors may need manual tuning**. An opt-in utility can sanity-check them against a live page. It is never imported by the app and never runs during `pytest`, requires a manually installed Chromium, and must be explicitly acknowledged:
+
+```bash
+playwright install chromium
+python scripts/manual_linkedin_smoke_test.py \
+  --search-url "https://www.linkedin.com/jobs/search/?keywords=Python&location=Pakistan" \
+  --max-jobs 1 \
+  --i-understand-this-makes-a-live-request
+```
+
+It caps at 3 jobs, validates the URL first, prints only a safe summary (page state, card count, title, company, location, validated job URL — never full HTML), stops immediately on a CAPTCHA/sign-in/access-restriction without retrying, never logs in or stores cookies, and never writes to the database.
+
+> Automated tests (`pytest -v`) make no external network requests, never launch Playwright, and never touch the real development database. **Phase 5 has not started** — there is still no public `/start` or `/cancel` endpoint and no export/dashboard.
 
 ## Phase 4 Features
 

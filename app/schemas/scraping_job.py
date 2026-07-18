@@ -57,3 +57,15 @@ class ScrapingJobListResponse(BaseModel):
 
     pagination: PaginatedResponse
     items: list[ScrapingJobSummary]
+
+
+class ScrapingJobStartResponse(BaseModel):
+    """Response returned when a scraping job is started."""
+
+    scraping_job_id: str
+    status: str
+    message: str
+    note: str = (
+        "Execution runs via FastAPI BackgroundTasks (an in-process MVP "
+        "convenience), which is not a production-grade job queue."
+    )
