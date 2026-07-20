@@ -183,8 +183,9 @@ class ScrapingJobExecutionService:
                 job.max_jobs,
             )
         except Exception as exc:  # search failure is fatal for the run
-            self._record_error(job.id, job.search_url, _search_error_type(exc), exc)
-            return self._finalize(job, ScrapingJobStatus.FAILED)
+            reason = _search_error_type(exc)
+            self._record_error(job.id, job.search_url, reason, exc)
+            return self._finalize(job, ScrapingJobStatus.FAILED, message=reason)
 
         job.discovered_jobs = len(search_result.jobs)
         self._db.commit()
@@ -207,6 +208,7 @@ class ScrapingJobExecutionService:
             except _BLOCKING_ERRORS as exc:
                 self._record_error(job.id, card.job_url, _search_error_type(exc), exc)
                 fatal_block = True
+                block_reason = _search_error_type(exc)
                 break
             except Exception as exc:  # recoverable: fall back to card-only
                 self._record_error(job.id, card.job_url, _detail_error_type(exc), exc)
@@ -214,12 +216,14 @@ class ScrapingJobExecutionService:
             self._process_and_persist(job, card, detail, index, detail_fetched, reference_time)
 
         # --- Final status -----------------------------------------------
+        final_message = None
         if fatal_block:
-            final = (
-                ScrapingJobStatus.PARTIALLY_COMPLETED
-                if job.successful_jobs > 0
-                else ScrapingJobStatus.FAILED
-            )
+            if job.successful_jobs > 0:
+                final = ScrapingJobStatus.PARTIALLY_COMPLETED
+                final_message = block_reason
+            else:
+                final = ScrapingJobStatus.FAILED
+                final_message = block_reason
         elif job.failed_jobs and job.successful_jobs:
             final = ScrapingJobStatus.PARTIALLY_COMPLETED
         elif job.failed_jobs and not job.successful_jobs:
@@ -227,7 +231,7 @@ class ScrapingJobExecutionService:
         else:
             final = ScrapingJobStatus.COMPLETED
 
-        return self._finalize(job, final)
+        return self._finalize(job, final, message=final_message)
 
     # ------------------------------------------------------------------
 
@@ -323,10 +327,21 @@ class ScrapingJobExecutionService:
         except Exception:  # never let error-recording break the run
             logger.warning("Failed to record scraping error of type %s.", error_type)
 
-    def _finalize(self, job: ScrapingJob, status: ScrapingJobStatus) -> ScrapingJob:
-        """Set the final status and completion timestamp, then commit."""
+    def _finalize(
+        self,
+        job: ScrapingJob,
+        status: ScrapingJobStatus,
+        message: str | None = None,
+    ) -> ScrapingJob:
+        """Set the final status and completion timestamp, then commit.
+
+        ``message`` (when given) is stored on ``error_message`` so the dashboard
+        can surface a readable blocked-page reason (e.g. captcha_detected).
+        """
         job.status = status.value
         job.completed_at = datetime.now(UTC)
+        if message is not None:
+            job.error_message = message
         self._db.commit()
         self._db.refresh(job)
         logger.info(

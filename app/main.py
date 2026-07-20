@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.api.dashboard import dashboard_router
 from app.api.health import router as health_router
 from app.api.jobs import export_router, jobs_router
 from app.api.scraping_jobs import scraping_jobs_router, search_router
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
     app.include_router(scraping_jobs_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
     app.include_router(export_router, prefix="/api")
+    app.include_router(dashboard_router)
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():

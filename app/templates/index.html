@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ app_name }}</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header__inner">
+      <div class="brand">
+        <span class="brand__logo" aria-hidden="true">◈</span>
+        <div>
+          <h1 class="brand__title">{{ app_name }}</h1>
+          <p class="brand__subtitle">Responsible job-search dashboard for publicly available listings</p>
+        </div>
+      </div>
+      <a class="docs-link" href="/docs" target="_blank" rel="noopener noreferrer">API Docs</a>
+    </div>
+  </header>
+
+  <div class="notice" role="note">
+    <strong>Responsible use:</strong> This tool only reads publicly available job
+    listings. It never logs in, stores cookies/credentials, solves CAPTCHAs, or
+    bypasses restrictions. If LinkedIn shows a sign-in wall, CAPTCHA, or access
+    restriction, scraping stops safely.
+  </div>
+
+  <main class="layout">
+    <!-- ============ SEARCH PANEL ============ -->
+    <section class="panel" id="search-panel" aria-labelledby="search-heading">
+      <h2 id="search-heading" class="panel__title">Start a Scraping Search</h2>
+      <form id="search-form" class="form-grid" novalidate>
+        <div class="field">
+          <label for="keywords">Keywords <span class="req">*</span></label>
+          <input type="text" id="keywords" name="keywords" required maxlength="150"
+                 placeholder="e.g. Python Developer" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="location">Location</label>
+          <input type="text" id="location" name="location" maxlength="150"
+                 placeholder="e.g. Pakistan" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="experience_level">Experience level</label>
+          <select id="experience_level" name="experience_level">
+            <option value="">Any</option>
+            <option value="internship">Internship</option>
+            <option value="entry_level">Entry level</option>
+            <option value="associate">Associate</option>
+            <option value="mid_senior">Mid-Senior</option>
+            <option value="director">Director</option>
+            <option value="executive">Executive</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="employment_type">Employment type</label>
+          <select id="employment_type" name="employment_type">
+            <option value="">Any</option>
+            <option value="full_time">Full-time</option>
+            <option value="part_time">Part-time</option>
+            <option value="contract">Contract</option>
+            <option value="temporary">Temporary</option>
+            <option value="internship">Internship</option>
+            <option value="volunteer">Volunteer</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="workplace_type">Workplace type</label>
+          <select id="workplace_type" name="workplace_type">
+            <option value="">Any</option>
+            <option value="onsite">On-site</option>
+            <option value="remote">Remote</option>
+            <option value="hybrid">Hybrid</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="date_posted">Date posted</label>
+          <select id="date_posted" name="date_posted">
+            <option value="">Any time</option>
+            <option value="past_24_hours">Past 24 hours</option>
+            <option value="past_week">Past week</option>
+            <option value="past_month">Past month</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="max_jobs">Maximum jobs</label>
+          <input type="number" id="max_jobs" name="max_jobs" min="1" max="50" value="20" />
+        </div>
+        <div class="field field--check">
+          <input type="checkbox" id="easy_apply_only" name="easy_apply_only" />
+          <label for="easy_apply_only">Easy Apply only</label>
+        </div>
+        <div class="field field--actions">
+          <button type="submit" id="search-submit" class="btn btn--primary">Search &amp; Start</button>
+          <span id="form-error" class="form-error" role="alert" aria-live="polite"></span>
+        </div>
+      </form>
+    </section>
+
+    <!-- ============ GLOBAL MESSAGE ============ -->
+    <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+
+    <!-- ============ PROGRESS CARD ============ -->
+    <section class="panel" id="progress-section" aria-labelledby="progress-heading" hidden>
+      <h2 id="progress-heading" class="panel__title">Scraping Progress</h2>
+      <div class="progress-head">
+        <span class="status-badge" id="job-status">pending</span>
+        <div class="progress-bar" aria-hidden="true">
+          <div class="progress-bar__fill" id="progress-fill"></div>
+        </div>
+        <span id="progress-percent" class="progress-percent">0%</span>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card"><span class="stat-card__value" id="stat-discovered">0</span><span class="stat-card__label">Discovered</span></div>
+        <div class="stat-card"><span class="stat-card__value" id="stat-processed">0</span><span class="stat-card__label">Processed</span></div>
+        <div class="stat-card"><span class="stat-card__value" id="stat-successful">0</span><span class="stat-card__label">Successful</span></div>
+        <div class="stat-card"><span class="stat-card__value" id="stat-duplicate">0</span><span class="stat-card__label">Duplicates</span></div>
+        <div class="stat-card"><span class="stat-card__value" id="stat-failed">0</span><span class="stat-card__label">Failed</span></div>
+      </div>
+      <div class="progress-times">
+        <span>Started: <span id="job-started">—</span></span>
+        <span>Completed: <span id="job-completed">—</span></span>
+      </div>
+      <div class="export-bar">
+        <button type="button" class="btn" id="export-search-csv" disabled>Search CSV</button>
+        <button type="button" class="btn" id="export-search-json" disabled>Search JSON</button>
+      </div>
+    </section>
+
+    <!-- ============ RESULTS + FILTERS ============ -->
+    <section class="panel" id="results-panel" aria-labelledby="results-heading">
+      <div class="results-header">
+        <h2 id="results-heading" class="panel__title">Jobs</h2>
+        <div class="export-bar">
+          <button type="button" class="btn" id="export-all-csv">All CSV</button>
+          <button type="button" class="btn" id="export-all-json">All JSON</button>
+        </div>
+      </div>
+
+      <form id="filter-form" class="filter-grid" novalidate>
+        <input type="text" id="f-keyword" placeholder="Keyword" autocomplete="off" />
+        <input type="text" id="f-company" placeholder="Company" autocomplete="off" />
+        <input type="text" id="f-location" placeholder="Location" autocomplete="off" />
+        <input type="text" id="f-country" placeholder="Country" autocomplete="off" />
+        <input type="text" id="f-skill" placeholder="Skill" autocomplete="off" />
+        <select id="f-workplace_type">
+          <option value="">Workplace: any</option>
+          <option value="onsite">On-site</option>
+          <option value="remote">Remote</option>
+          <option value="hybrid">Hybrid</option>
+        </select>
+        <select id="f-employment_type">
+          <option value="">Employment: any</option>
+          <option value="full_time">Full-time</option>
+          <option value="part_time">Part-time</option>
+          <option value="contract">Contract</option>
+          <option value="temporary">Temporary</option>
+          <option value="internship">Internship</option>
+          <option value="volunteer">Volunteer</option>
+        </select>
+        <select id="f-experience_level">
+          <option value="">Experience: any</option>
+          <option value="internship">Internship</option>
+          <option value="entry_level">Entry level</option>
+          <option value="associate">Associate</option>
+          <option value="mid_senior">Mid-Senior</option>
+          <option value="director">Director</option>
+          <option value="executive">Executive</option>
+        </select>
+        <select id="f-easy_apply">
+          <option value="">Easy Apply: any</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+        <select id="f-sort">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+        </select>
+        <div class="filter-actions">
+          <button type="submit" class="btn btn--primary" id="apply-filters">Apply</button>
+          <button type="button" class="btn" id="clear-filters">Clear</button>
+        </div>
+      </form>
+
+      <div id="results-loading" class="loading" hidden>Loading jobs…</div>
+      <div id="results-empty" class="empty-state" hidden>No jobs found.</div>
+
+      <div class="table-wrap">
+        <table id="results-table" class="results-table">
+          <thead>
+            <tr>
+              <th>Title</th><th>Company</th><th>Location</th><th>Workplace</th>
+              <th>Employment</th><th>Experience</th><th>Skills</th><th>Salary</th>
+              <th>Period</th><th>Applicants</th><th>Posted</th><th>Easy Apply</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="results-body"></tbody>
+        </table>
+      </div>
+
+      <div class="pagination" id="pagination">
+        <button type="button" class="btn" id="page-prev" disabled>Previous</button>
+        <span id="page-info">Page 1</span>
+        <button type="button" class="btn" id="page-next" disabled>Next</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ JOB DETAIL MODAL ============ -->
+  <div id="job-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" hidden>
+    <div class="modal__backdrop" id="modal-backdrop"></div>
+    <div class="modal__panel" role="document">
+      <button type="button" class="modal__close" id="modal-close" aria-label="Close details">×</button>
+      <h3 id="modal-title" class="modal__title"></h3>
+      <p class="modal__company" id="modal-company"></p>
+      <dl class="modal__grid">
+        <dt>Location</dt><dd id="modal-location"></dd>
+        <dt>Workplace</dt><dd id="modal-workplace"></dd>
+        <dt>Employment</dt><dd id="modal-employment"></dd>
+        <dt>Experience</dt><dd id="modal-experience"></dd>
+        <dt>Salary</dt><dd id="modal-salary"></dd>
+        <dt>Salary period</dt><dd id="modal-period"></dd>
+        <dt>Applicants</dt><dd id="modal-applicants"></dd>
+        <dt>Posted</dt><dd id="modal-posted"></dd>
+        <dt>Recruiter</dt><dd id="modal-recruiter"></dd>
+      </dl>
+      <h4 class="modal__subtitle">Skills</h4>
+      <div id="modal-skills" class="chip-row"></div>
+      <h4 class="modal__subtitle">Description</h4>
+      <p id="modal-description" class="modal__description"></p>
+      <a id="modal-link" class="btn btn--primary" href="#" target="_blank" rel="noopener noreferrer" hidden>View on LinkedIn</a>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    <p>For responsible personal job-search research only. Not affiliated with LinkedIn.</p>
+  </footer>
+
+  <script src="/static/js/dashboard.js" defer></script>
+</body>
+</html>

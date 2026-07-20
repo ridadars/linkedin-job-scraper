@@ -2,6 +2,80 @@
 
 A modular FastAPI application for searching publicly available LinkedIn job listings, storing results in SQLite, and exporting data for personal job-search research.
 
+> **Phase 6 complete:** A responsive Jinja2 + vanilla-JS dashboard at `/` that drives the full Phase 5 API workflow (search → start → progress polling → results → filtering → job details → exports), plus an optional synthetic demo-data seeder.
+
+## Phase 6 Dashboard
+
+Open the app root (`/`) for a single-page dashboard built with Jinja2, plain CSS,
+and dependency-free vanilla JavaScript (no React/Vue/build step). It talks only to
+the existing `/api/*` endpoints.
+
+### Setup & running
+
+```bash
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload
+# then open http://127.0.0.1:8000/
+```
+
+The API docs remain at `/docs`; the dashboard route does not appear in the OpenAPI schema.
+
+### Dashboard workflow
+
+1. Enter search filters (keywords required) and click **Search & Start**.
+2. The page calls `POST /api/search-jobs`, then `POST /api/scraping-jobs/{id}/start`.
+3. It polls `GET /api/scraping-jobs/{id}` every ~2.5s, updating status, counters, and a progress bar.
+4. Polling stops on `completed` / `partially_completed` / `failed` / `cancelled`.
+5. On success it loads `GET /api/scraping-jobs/{id}/results` into a responsive table.
+6. **View** opens a modal (`GET /api/jobs/{id}`) with full details; missing fields show *Not available*. The modal closes via its button, the Escape key, or a backdrop click.
+7. The **Filters** panel browses all stored jobs via `GET /api/jobs` (keyword, company, location, country, skill, workplace/employment/experience type, Easy Apply, newest/oldest sort) with pagination.
+8. Export buttons download **current-search** and **all-jobs** CSV/JSON. Search-specific exports stay disabled until a scraping job exists.
+
+All dynamic values are rendered with `textContent`/`createElement` (never HTML
+injection); external LinkedIn links open in a new tab with `rel="noopener noreferrer"`.
+
+### Blocked-page messages
+
+If a run ends in a sign-in wall, CAPTCHA, or access restriction, the dashboard
+shows a clear message stating the system **stopped and did not attempt to bypass**
+it. (The execution service now records the blocking reason on the job so the UI
+can surface it.)
+
+### Demonstrating with synthetic demo data
+
+Because unauthenticated LinkedIn returns a sign-in wall (see limitation below), a
+live end-to-end scrape can't be shown. Seed synthetic, clearly-labelled `[DEMO]`
+jobs to demonstrate the results table, filters, modal, and exports:
+
+```bash
+python scripts/seed_demo_jobs.py          # seeds once; skips if demo data exists
+python scripts/seed_demo_jobs.py --force  # add another batch
+```
+
+The seeder is **manual only** — never imported by the app, never run by tests,
+never destructive (it doesn't overwrite/delete real rows), and there is **no
+public seed endpoint**. After seeding, open `/` and click **Apply** to browse the
+demo jobs, open details, and try exports.
+
+### Current LinkedIn sign-in-wall limitation
+
+Running the optional live smoke test (`scripts/manual_linkedin_smoke_test.py`)
+against the public logged-out `/jobs/search/` page returns a **sign-in wall**,
+which the scraper correctly detects as `authentication_required` and stops on. So
+live scraping requires an authorized/authenticated context that is out of scope
+here; use the demo seeder to exercise the dashboard.
+
+### Screenshots
+
+<!-- TODO: add dashboard screenshots (search panel, progress card, results table, job modal). -->
+_Screenshots placeholder — add captures of the search panel, progress card, results table, and job-detail modal._
+
+> Automated tests (`pytest -v`) require no browser automation, make no external
+> network requests, and never touch the real development database. **Phase 7 has
+> not started.**
+
 > **Phase 5 (MVP) complete:** Background job execution via a `start` endpoint, results & jobs query APIs with filtering/sorting/pagination, and CSV/JSON exports (global and per scraping-job).
 
 ## Phase 5 API
